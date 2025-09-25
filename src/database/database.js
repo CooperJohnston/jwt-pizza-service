@@ -55,49 +55,67 @@ class DB {
     }
   }
 
-  async getUser(email, password) {
+  async getUser(emailOrFilter, password) {
     const connection = await this.getConnection();
     try {
-      const userResult = await this.query(connection, `SELECT * FROM user WHERE email=?`, [email]);
-      const user = userResult[0];
-      if (!user || (password && !(await bcrypt.compare(password, user.password)))) {
-        throw new StatusCodeError('unknown user', 404);
+      let user;
+      if (emailOrFilter && typeof emailOrFilter === 'object' && emailOrFilter.id != null) {
+        const userResult = await this.query(connection, `SELECT * FROM user WHERE id=?`, [emailOrFilter.id]);
+        user = userResult[0];
+      } else {
+        const email = emailOrFilter;
+        const userResult = await this.query(connection, `SELECT * FROM user WHERE email=?`, [email]);
+        user = userResult[0];
+        if (!user || (password && !(await bcrypt.compare(password, user.password)))) {
+          throw new StatusCodeError('unknown user', 404);
+        }
       }
-
+  
+      if (!user) throw new StatusCodeError('unknown user', 404);
+  
       const roleResult = await this.query(connection, `SELECT * FROM userRole WHERE userId=?`, [user.id]);
-      const roles = roleResult.map((r) => {
-        return { objectId: r.objectId || undefined, role: r.role };
-      });
-
-      return { ...user, roles: roles, password: undefined };
+      const roles = roleResult.map(r => ({ objectId: r.objectId || undefined, role: r.role }));
+      return { ...user, roles, password: undefined };
     } finally {
       connection.end();
     }
   }
+  
 
-  async updateUser(userId, name, email, password) {
-    const connection = await this.getConnection();
-    try {
-      const params = [];
-      if (password) {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        params.push(`password='${hashedPassword}'`);
-      }
-      if (email) {
-        params.push(`email='${email}'`);
-      }
-      if (name) {
-        params.push(`name='${name}'`);
-      }
-      if (params.length > 0) {
-        const query = `UPDATE user SET ${params.join(', ')} WHERE id=${userId}`;
-        await this.query(connection, query);
-      }
-      return this.getUser(email, password);
-    } finally {
-      connection.end();
+
+async updateUser(userId, name, email, password) {
+  const conn = await this.getConnection();
+  try {
+    const sets = [];
+    const params = [];
+
+    if (name !== undefined) {
+      sets.push('name = ?');
+      params.push(name);
     }
+    if (email !== undefined) {
+      sets.push('email = ?');
+      params.push(email);
+    }
+    if (password !== undefined) {
+      const hashed = await bcrypt.hash(password, 10);
+      sets.push('password = ?');
+      params.push(hashed);
+    }
+
+    if (sets.length > 0) {
+      params.push(Number(userId)); // ensure numeric
+      const sql = `UPDATE user SET ${sets.join(', ')} WHERE id = ?`;
+      await this.query(conn, sql, params);
+    }
+
+    // Always fetch by id after update
+    return await this.getUser({ id: Number(userId) });
+  } finally {
+    await conn.end(); // or conn.release() if you’re using a pool
   }
+}
+
 
   async loginUser(userId, token) {
     token = this.getTokenSignature(token);
