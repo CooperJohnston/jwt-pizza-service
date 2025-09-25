@@ -15,7 +15,7 @@ async function createUser({ role }) {
   const name = `${role}-user-${rand()}`;
   const email = `${name}@test.com`;
   const password = role === 'admin' ? 'toomanysecrets' : 'password';
-  const created = await DB.addUser({
+  await DB.addUser({
     name,
     email,
     password,
@@ -133,8 +133,6 @@ describe('POST /api/order', () => {
       .send(payload);
 
     if (res.status !== 200) {
-      // helpful when debugging
-      // eslint-disable-next-line no-console
       console.error('POST /api/order failed:', res.status, res.body);
     }
 
