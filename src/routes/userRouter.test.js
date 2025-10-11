@@ -2,104 +2,161 @@ const request = require('supertest');
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
 
-let userAuthToken;
-let user;
+// ---------- Helpers ----------
+function rand() {
+  return Math.random().toString(36).slice(2, 10);
+}
 
-beforeAll(async () => {
-  user = await createUser(); // regular user for /me test
-});
-
-beforeEach(async () => {
-  const res = await request(app)
-    .put('/api/auth')
-    .send({ email: user.email, password: 'password' });
-  userAuthToken = res.body.token;
-});
-
-async function createUser() {
-  const name = 'Test User ' + Math.random().toString(36).substring(7);
-  const email = name.replace(/ /g, '_').toLowerCase() + '@example.com';
+async function createUser(role = Role.Diner) {
+  const name = `Test ${rand()}`;
+  const email = `${name.replace(/\s+/g, '_').toLowerCase()}@example.com`;
   const password = 'password';
 
-  // Use enum constant to match isRole(Role.Diner)
-  const created = await DB.addUser({
-    name,
-    email,
-    password,
-    roles: [{ role: Role.Diner }],
-  });
+  const created = await DB.addUser({ name, email, password, roles: [{ role }] });
 
-  // Ensure we have the full row (with id)
-  const full =
-    created?.id
-      ? await DB.getUser({ id: created.id })
-      : await DB.getUser({ email });
-
-  return { ...full, password }; // keep plaintext only for test logins
-}
-
-// --- Admin helpers ---
-function randomName() {
-  return Math.random().toString(36).substring(2, 15);
-}
-
-async function createAdminUser() {
-  const name = `admin-${randomName()}`;
-  const email = `${name}@admin.com`;
-  const password = 'toomanysecrets';
-
-  const created = await DB.addUser({
-    name,
-    email,
-    password,
-    roles: [{ role: Role.Admin }], // enum constant
-  });
-
-  const full =
-    created?.id
-      ? await DB.getUser({ id: created.id })
-      : await DB.getUser({ email });
+  // Ensure we have id (some DBs return partial row from addUser)
+  let full = created;
+  if (!full?.id) {
+    // Prefer whichever your DB supports:
+    // full = await DB.getUser({ email });
+    full = await DB.getUser(email, password); // if your DB.getUser(email, password) returns the row
+  }
 
   return { ...full, password };
 }
 
-test('get authenticated user', async () => {
+async function login(email, password) {
+  const res = await request(app).put('/api/auth').send({ email, password });
+  expect(res.status).toBe(200);
+  return res.body.token;
+}
+
+async function registerUser(agent = request(app)) {
+  const testUser = {
+    name: 'pizza diner',
+    email: `user_${rand()}@test.com`,
+    password: 'a',
+  };
+  const res = await agent.post('/api/auth').send(testUser);
+  expect(res.status).toBe(200);
+  return [{ ...res.body.user, password: testUser.password }, res.body.token];
+}
+
+// ---------- Tests ----------
+
+// No global beforeEach that logs in!
+// If you want grouping, use describe blocks + local beforeEach.
+
+test('get authenticated user (/api/user/me)', async () => {
+  const me = await createUser(Role.Diner);
+  const token = await login(me.email, me.password);
+
   const res = await request(app)
     .get('/api/user/me')
-    .set('Authorization', `Bearer ${userAuthToken}`);
+    .set('Authorization', `Bearer ${token}`);
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('id', user.id);
-  expect(res.body).toHaveProperty('email', user.email);
+  expect(res.body).toHaveProperty('id', me.id);
+  expect(res.body).toHaveProperty('email', me.email);
 });
 
-test('admin can update another user', async () => {
-  // 1) Create admin and login
-  const admin = await createAdminUser();
-  const loginRes = await request(app)
-    .put('/api/auth')
-    .send({ email: admin.email, password: admin.password });
-  expect(loginRes.status).toBe(200);
-  const adminAuthToken = loginRes.body.token;
+test('admin can update another user (/api/user/:id PUT)', async () => {
+  const admin = await createUser(Role.Admin);
+  const target = await createUser(Role.Diner);
 
-  // 2) Update target user (must have a valid id)
-  expect(user.id).toBeDefined(); // guard against undefined id
+  const adminToken = await login(admin.email, admin.password);
 
-  const newName = 'Updated Name ' + Math.random().toString(36).substring(7);
-  const updateRes = await request(app)
-    .put(`/api/user/${user.id}`)
-    .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send({ name: newName }); // only name; email/password omitted
+  const newName = `Updated ${rand()}`;
+  const res = await request(app)
+    .put(`/api/user/${target.id}`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ name: newName });
 
-  if (updateRes.status !== 200) {
-    console.error('Update failed:', updateRes.status, updateRes.body);
+  if (res.status !== 200) {
+    // quick breadcrumb if it fails
+    // eslint-disable-next-line no-console
+    console.error('Update failed:', res.status, res.body);
   }
 
-  expect(updateRes.status).toBe(200);
-  expect(updateRes.body.user).toMatchObject({
-    id: user.id,
-    name: newName,
-    email: user.email,
-  });
-  expect(typeof updateRes.body.token).toBe('string');
+  expect(res.status).toBe(200);
+  // Your docs say response is { user, token }
+  expect(res.body.user).toMatchObject({ id: target.id, name: newName, email: target.email });
+  expect(typeof res.body.token).toBe('string');
+});
+
+test('list users unauthorized -> 401', async () => {
+  const res = await request(app).get('/api/user?page=0&limit=10&name=*');
+  expect(res.status).toBe(401);
+});
+
+test('list users as non-admin -> 403', async () => {
+  const diner = await createUser(Role.Diner);
+  const dinerToken = await login(diner.email, diner.password);
+
+  const res = await request(app)
+    .get('/api/user?page=0&limit=10&name=*')
+    .set('Authorization', `Bearer ${dinerToken}`);
+
+  expect(res.status).toBe(403);
+});
+
+test('list users as admin -> 200', async () => {
+  const admin = await createUser(Role.Admin);
+  const adminToken = await login(admin.email, admin.password);
+
+  const res = await request(app)
+    .get('/api/user?page=0&limit=10&name=*')
+    .set('Authorization', `Bearer ${adminToken}`);
+
+  expect(res.status).toBe(200);
+  expect(Array.isArray(res.body.users)).toBe(true);
+  expect(typeof res.body.more).toBe('boolean');
+});
+
+test('200 when admin deletes an existing user', async () => {
+  const target = await createUser(Role.Diner);
+  const admin  = await createUser(Role.Admin);
+  const adminToken = await login(admin.email, admin.password);
+
+  const res = await request(app)
+    .delete(`/api/user/${target.id}`)
+    .set('Authorization', `Bearer ${adminToken}`);
+
+  console.log(res.body);
+
+  expect(res.status).toBe(200);
+  expect(res.body).toEqual({ message: 'user deleted' });
+
+  // Optional: deleting again should 404
+  const res2 = await request(app)
+    .delete(`/api/user/${target.id}`)
+    .set('Authorization', `Bearer ${adminToken}`);
+  expect(res2.status).toBe(404);
+});
+
+test('401 when not authenticated', async () => {
+  const res = await request(app).delete('/api/user/1');
+  expect(res.status).toBe(401);
+});
+
+test('403 when authenticated but not admin', async () => {
+  const diner = await createUser(Role.Diner);
+  const dinerToken = await login(diner.email, diner.password);
+
+  const res = await request(app)
+    .delete(`/api/user/${diner.id}`)
+    .set('Authorization', `Bearer ${dinerToken}`);
+
+  expect(res.status).toBe(403);
+});
+
+test('404 when admin deletes non-existent user', async () => {
+  const admin = await createUser(Role.Admin);
+  const adminToken = await login(admin.email, admin.password);
+
+  const res = await request(app)
+    .delete('/api/user/99999999')
+    .set('Authorization', `Bearer ${adminToken}`);
+
+  expect(res.status).toBe(404);
 });

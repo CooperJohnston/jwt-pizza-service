@@ -80,6 +80,78 @@ class DB {
       connection.end();
     }
   }
+
+
+  async getAllUsers({ page = 0, limit = 10, name = '*' } = {}) {
+    const conn = await this.getConnection();
+    try {
+      const safeLimit = Math.max(1, Math.min(parseInt(limit) || 10, 100));
+      const safePage  = Math.max(0, parseInt(page) || 0);
+      const offset    = safePage * safeLimit;
+      const nameLike  = name === '*' ? '%' : `%${name}%`;
+  
+      // 1) Page distinct users (IDs only), fetch limit+1 to compute "more"
+      const idRows = await this.query(
+        conn,
+        `
+          SELECT u.id
+          FROM \`user\` u
+          WHERE u.name LIKE ?
+          ORDER BY u.id
+          LIMIT ${safeLimit + 1} OFFSET ${offset}
+        `,
+        [nameLike]
+      );
+      const ids = idRows.map(r => r.id);
+      const more = ids.length > safeLimit;
+      const pageIds = ids.slice(0, safeLimit);
+      if (!pageIds.length) return { users: [], more: false };
+  
+      // 2) Fetch user records for those IDs
+      const usersRows = await this.query(
+        conn,
+        `
+          SELECT u.id, u.name, u.email
+          FROM \`user\` u
+          WHERE u.id IN (${pageIds.map(() => '?').join(',')})
+          ORDER BY u.id
+        `,
+        pageIds
+      );
+  
+      // 3) Fetch roles for those IDs
+      const rolesRows = await this.query(
+        conn,
+        `
+          SELECT ur.userId, ur.role
+          FROM userRole ur
+          WHERE ur.userId IN (${pageIds.map(() => '?').join(',')})
+        `,
+        pageIds
+      );
+  
+      // 4) Stitch
+      const rolesByUser = new Map();
+      for (const r of rolesRows) {
+        if (!rolesByUser.has(r.userId)) rolesByUser.set(r.userId, []);
+        rolesByUser.get(r.userId).push({ role: r.role });
+      }
+      const users = usersRows.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        roles: rolesByUser.get(u.id) ?? [],
+      }));
+  
+      return { users, more };
+    } finally {
+       await conn.end();
+    }
+  }
+  
+
+  
+
   
 
 
@@ -378,7 +450,31 @@ async updateUser(userId, name, email, password) {
     const [rows] = await connection.execute(`SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?`, [config.db.connection.database]);
     return rows.length > 0;
   }
-}
+
+
+async deleteUser(userId) {
+  const conn = await this.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    
+    await this.query(conn, 'DELETE FROM userRole WHERE userId = ?', [userId]);
+    await this.query(conn, 'DELETE FROM auth     WHERE userId = ?', [userId]);
+
+    // Delete the user
+    const result = await this.query(conn, 'DELETE FROM `user` WHERE id = ?', [userId]);
+
+    await conn.commit();
+
+    const affected = result?.affectedRows ?? result?.[0]?.affectedRows ?? 0;
+    return affected;
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    await conn.end();
+  }
+}}
 
 const db = new DB();
 module.exports = { Role, DB: db };

@@ -15,6 +15,23 @@ userRouter.docs = [
     response: { id: 1, name: '常用名字', email: 'a@jwt.com', roles: [{ role: 'admin' }] },
   },
   {
+    method: 'GET',
+    path: '/api/user?page=1&limit=10&name=*',
+    requiresAuth: true,
+    description: 'Gets a list of users',
+    example: `curl -X GET localhost:3000/api/user -H 'Authorization: Bearer tttttt'`,
+    response: {
+      users: [
+        {
+          id: 1,
+          name: '常用名字',
+          email: 'a@jwt.com',
+          roles: [{ role: 'admin' }],
+        },
+      ],
+    },
+  },
+  {
     method: 'PUT',
     path: '/api/user/:userId',
     requiresAuth: true,
@@ -50,5 +67,60 @@ userRouter.put(
     res.json({ user: updatedUser, token: auth });
   })
 );
+
+
+userRouter.get(
+  '/',
+  authRouter.authenticateToken, // ensures req.user exists or 401s
+  asyncHandler(async (req, res) => {
+    // Be defensive in case isRole isn't attached for some reason:
+    const hasIsRole = typeof req.user?.isRole === 'function';
+    const isAdmin =
+      hasIsRole
+        ? req.user.isRole(Role.Admin)
+        : Array.isArray(req.user?.roles) && req.user.roles.some(r => r.role === Role.Admin);
+
+    if (!isAdmin) {
+      // Return 403 directly instead of throwing
+      return res.status(403).json({ message: 'forbidden' });
+    }
+
+    const page  = Number(req.query.page ?? 0) || 0;
+    const limit = Math.max(1, Math.min(Number(req.query.limit ?? 10) || 10, 100));
+    const name  = (req.query.name ?? '*').toString();
+
+    const result = await DB.getAllUsers({ page, limit, name }); // { users, more }
+    return res.json(result);
+  })
+);
+
+userRouter.delete(
+  '/:userId',
+  authRouter.authenticateToken, // 401 if not logged in
+  asyncHandler(async (req, res) => {
+    // robust admin check (works even if isRole missing)
+    const isAdmin = typeof req.user?.isRole === 'function'
+      ? req.user.isRole(Role.Admin)
+      : Array.isArray(req.user?.roles) && req.user.roles.some(r => r.role === Role.Admin);
+
+    if (!isAdmin) {
+      return res.status(403).json({ message: 'forbidden' });
+    }
+
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'invalid user id' });
+    }
+
+    const affected = await DB.deleteUser(userId);
+    if (!affected) {
+      return res.status(404).json({ message: 'user not found' });
+    }
+
+    return res.json({ message: 'user deleted' });
+  })
+);
+
+
 
 module.exports = userRouter;
