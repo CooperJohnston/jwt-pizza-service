@@ -31,17 +31,6 @@ async function login(email, password) {
   return res.body.token;
 }
 
-async function registerUser(agent = request(app)) {
-  const testUser = {
-    name: 'pizza diner',
-    email: `user_${rand()}@test.com`,
-    password: 'a',
-  };
-  const res = await agent.post('/api/auth').send(testUser);
-  expect(res.status).toBe(200);
-  return [{ ...res.body.user, password: testUser.password }, res.body.token];
-}
-
 // ---------- Tests ----------
 
 // No global beforeEach that logs in!
@@ -73,8 +62,6 @@ test('admin can update another user (/api/user/:id PUT)', async () => {
     .send({ name: newName });
 
   if (res.status !== 200) {
-    // quick breadcrumb if it fails
-    // eslint-disable-next-line no-console
     console.error('Update failed:', res.status, res.body);
   }
 

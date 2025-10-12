@@ -468,9 +468,6 @@ async deleteUser(userId) {
 
     const affected = result?.affectedRows ?? result?.[0]?.affectedRows ?? 0;
     return affected;
-  } catch (err) {
-    try { await conn.rollback(); } catch {}
-    throw err;
   } finally {
     await conn.end();
   }
