@@ -88,7 +88,13 @@ class DB {
       const safeLimit = Math.max(1, Math.min(parseInt(limit) || 10, 100));
       const safePage  = Math.max(0, parseInt(page) || 0);
       const offset    = safePage * safeLimit;
-      const nameLike  = name === '*' ? '%' : `%${name}%`;
+      const raw = (name ?? '*').toString();
+      const nameLike =
+      raw === '*'
+        ? '%'
+        : raw.includes('*')
+          ? raw.replace(/\*/g, '%')    // '*kai*' -> '%kai%'
+          : `%${raw}%`;     
   
       // 1) Page distinct users (IDs only), fetch limit+1 to compute "more"
       const idRows = await this.query(
