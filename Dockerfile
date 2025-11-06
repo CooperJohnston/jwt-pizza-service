@@ -1,5 +1,6 @@
 ARG NODE_VERSION=22
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm-slim
+FROM --platform=$TARGETPLATFORM node:${NODE_VERSION}-bookworm-slim
+
 
 WORKDIR /usr/src/app
 
