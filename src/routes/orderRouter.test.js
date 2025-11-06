@@ -1,5 +1,14 @@
 // __tests__/orderRouter.test.js
 const request = require('supertest');
+jest.mock('../metrics.js', () => ({
+  requestTracker: () => (req, res, next) => next(),   // no-op middleware
+  recordAuthAttempt: () => {},
+  markUserSeen: () => {},
+  recordOrderPlaced: () => {},
+  recordOrderFailure: () => {},
+  recordFactoryLatency: () => {},
+  sendMetricsPeriodically: () => {},
+}));
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
 

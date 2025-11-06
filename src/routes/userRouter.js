@@ -2,6 +2,7 @@ const express = require('express');
 const { asyncHandler } = require('../endpointHelper.js');
 const { DB, Role } = require('../database/database.js');
 const { authRouter, setAuth } = require('./authRouter.js');
+const metrics = require('../metrics.js');
 
 const userRouter = express.Router();
 
@@ -43,7 +44,7 @@ userRouter.docs = [
 
 // getUser
 userRouter.get(
-  '/me',
+  '/me',metrics.requestTracker('/api/user/me'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     res.json(req.user);
@@ -52,7 +53,7 @@ userRouter.get(
 
 // updateUser
 userRouter.put(
-  '/:userId',
+  '/:userId',metrics.requestTracker('/api/user/:userId'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     const { name, email, password } = req.body;
@@ -70,7 +71,7 @@ userRouter.put(
 
 
 userRouter.get(
-  '/',
+  '/',metrics.requestTracker('/api/user'),
   authRouter.authenticateToken, // ensures req.user exists or 401s
   asyncHandler(async (req, res) => {
     // Be defensive in case isRole isn't attached for some reason:
@@ -95,7 +96,7 @@ userRouter.get(
 );
 
 userRouter.delete(
-  '/:userId',
+  '/:userId',metrics.requestTracker('/api/user/:userId'),
   authRouter.authenticateToken, // 401 if not logged in
   asyncHandler(async (req, res) => {
     // robust admin check (works even if isRole missing)

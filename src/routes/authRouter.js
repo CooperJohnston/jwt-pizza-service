@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config.js');
 const { asyncHandler } = require('../endpointHelper.js');
 const { DB, Role } = require('../database/database.js');
+const metrics = require('../metrics.js')
 
 const authRouter = express.Router();
 
@@ -39,6 +40,7 @@ async function setAuthUser(req, res, next) {
         // Check the database to make sure the token is valid.
         req.user = jwt.verify(token, config.jwtSecret);
         req.user.isRole = (role) => !!req.user.roles.find((r) => r.role === role);
+        metrics.markUserSeen(req.user.id);
       }
     } catch {
       req.user = null;
@@ -50,6 +52,9 @@ async function setAuthUser(req, res, next) {
 // Authenticate token
 authRouter.authenticateToken = (req, res, next) => {
   if (!req.user) {
+    if (req.method === 'DELETE' && req.baseUrl.endsWith('/auth')) {
+      metrics.recordAuthAttempt('logout', 'unauthorized');
+    }
     return res.status(401).send({ message: 'unauthorized' });
   }
   next();
@@ -58,13 +63,18 @@ authRouter.authenticateToken = (req, res, next) => {
 // register
 authRouter.post(
   '/',
+  
+  metrics.requestTracker('/api/auth'),
+
   asyncHandler(async (req, res) => {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
+      metrics.recordAuthAttempt('register', 'validation_error');
       return res.status(400).json({ message: 'name, email, and password are required' });
     }
     const user = await DB.addUser({ name, email, password, roles: [{ role: Role.Diner }] });
     const auth = await setAuth(user);
+    metrics.recordAuthAttempt('register', 'success');
     res.json({ user: user, token: auth });
   })
 );
@@ -72,10 +82,12 @@ authRouter.post(
 // login
 authRouter.put(
   '/',
+  metrics.requestTracker('/api/auth'),
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     const user = await DB.getUser(email, password);
     const auth = await setAuth(user);
+    metrics.recordAuthAttempt('login', 'success');
     res.json({ user: user, token: auth });
   })
 );
@@ -83,9 +95,11 @@ authRouter.put(
 // logout
 authRouter.delete(
   '/',
+  metrics.requestTracker('/api/auth'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     await clearAuth(req);
+    metrics.recordAuthAttempt('logout', 'success');
     res.json({ message: 'logout successful' });
   })
 );

@@ -3,7 +3,7 @@ const config = require('../config.js');
 const { Role, DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
-
+const metrics = require('../metrics.js');
 const orderRouter = express.Router();
 
 orderRouter.docs = [
@@ -42,7 +42,7 @@ orderRouter.docs = [
 
 // getMenu
 orderRouter.get(
-  '/menu',
+  '/menu',metrics.requestTracker('/api/order/menu'),
   asyncHandler(async (req, res) => {
     res.send(await DB.getMenu());
   })
@@ -50,7 +50,7 @@ orderRouter.get(
 
 // addMenuItem
 orderRouter.put(
-  '/menu',
+  '/menu',metrics.requestTracker('/api/order/menu'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     if (!req.user.isRole(Role.Admin)) {
@@ -65,7 +65,7 @@ orderRouter.put(
 
 // getOrders
 orderRouter.get(
-  '/',
+  '/',metrics.requestTracker('/api/order'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     res.json(await DB.getOrders(req.user, req.query.page));
@@ -74,20 +74,36 @@ orderRouter.get(
 
 // createOrder
 orderRouter.post(
-  '/',
+  '/',metrics.requestTracker('/api/order'),
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     const orderReq = req.body;
     const order = await DB.addDinerOrder(req.user, orderReq);
+    // track time
+    const t0 = process.hrtime.bigint()
     const r = await fetch(`${config.factory.url}/api/order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', authorization: `Bearer ${config.factory.apiKey}` },
       body: JSON.stringify({ diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order }),
     });
+    const t1 = process.hrtime.bigint();
+    const factoryMs = Number(t1 - t0) / 1e6;
+
+    // record factory latency (success or failure)
+    metrics.recordFactoryLatency(factoryMs);
     const j = await r.json();
     if (r.ok) {
+      // create business metrics: orders, items, revenue
+      const itemsCount = Array.isArray(order.items) ? order.items.length : 0;
+      // add up the price and then record it
+      const revenueMinorUnits = Array.isArray(order.items)
+        ? order.items.reduce((sum, it) => sum + Math.round((Number(it.price) || 0) * 100), 0)
+        : 0;
+
+      metrics.recordOrderPlaced({ itemsCount, revenueMinorUnits });
       res.send({ order, followLinkToEndChaos: j.reportUrl, jwt: j.jwt });
     } else {
+      metrics.recordOrderFailure('factory_error');
       res.status(500).send({ message: 'Failed to fulfill order at factory', followLinkToEndChaos: j.reportUrl });
     }
   })
