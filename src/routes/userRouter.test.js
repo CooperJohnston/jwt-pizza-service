@@ -119,7 +119,7 @@ test('200 when admin deletes an existing user', async () => {
     .delete(`/api/user/${target.id}`)
     .set('Authorization', `Bearer ${adminToken}`);
 
-  console.log(res.body);
+  //console.log(res.body);
 
   expect(res.status).toBe(200);
   expect(res.body).toEqual({ message: 'user deleted' });

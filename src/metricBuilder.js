@@ -1,4 +1,4 @@
-const config = require('./config');
+const { metrics: mcfg } = require('./config')
 
 class MetricBuilder {
 
@@ -20,7 +20,7 @@ class MetricBuilder {
           // add minimal resource + scope metadata
           resource: {
             attributes: [
-              { key: 'service.name', value: { stringValue: config.source || 'pizza-web' } },
+              { key: 'service.name', value: { stringValue: mcfg.source || 'pizza-web' } },
             ],
           },
           scopeMetrics: [
@@ -33,11 +33,11 @@ class MetricBuilder {
       ],
     };
 
-    fetch(`${config.url}`, {
+    fetch(`${mcfg.url}`, {
       method: 'POST',
       body: JSON.stringify(body),
       headers: {
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${mcfg.apiKey}`,
         'Content-Type': 'application/json',
       },
     })
@@ -54,7 +54,7 @@ class MetricBuilder {
   }
 
   createMetric(metricName, metricValue, metricUnit, metricType, valueType, attributes) {
-    attributes = { ...attributes, source: config.source };
+    attributes = { ...attributes, source: mcfg.source };
 
     const dataPoint = {
       [valueType]: metricValue,

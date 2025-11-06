@@ -115,6 +115,7 @@ function getMemoryUsedPercent() {
   }
 
   async function flushOnce() {
+   console.log('Flushing metrics...');
     // Snapshot & reset to avoid races while requests are arriving
     const snap_httpCounts = { ...httpCounts };
     const snap_httpLatencySumMs = { ...httpLatencySumMs };
