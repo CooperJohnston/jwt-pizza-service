@@ -84,11 +84,31 @@ authRouter.put(
   '/',
   metrics.requestTracker('/api/auth'),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    const user = await DB.getUser(email, password);
-    const auth = await setAuth(user);
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      metrics.recordAuthAttempt('login', 'validation_error');
+      return res.status(400).json({ message: 'email and password are required' });
+    }
+
+    let user;
+    try {
+      user = await DB.getUser(email, password);
+    } catch (e) {
+      // DB error reading user/credentials
+      metrics.recordAuthAttempt('login', 'error');
+      return res.status(500).json({ message: 'internal error' });
+    }
+
+    if (!user) {
+      // Incorrect email/password
+      metrics.recordAuthAttempt('login', 'invalid_credentials');
+      // 401 is conventional for bad creds
+      return res.status(401).json({ message: 'invalid email or password' });
+    }
+
+    const token = await setAuth(user);
     metrics.recordAuthAttempt('login', 'success');
-    res.json({ user: user, token: auth });
+    res.json({ user, token });
   })
 );
 
