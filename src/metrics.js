@@ -1,4 +1,4 @@
-const MetricBuilder = require('../src/metricBuilder.js');
+const MetricBuilder = require('./metricBuilder.js');
 
 const os = require('os');
 // need total request count per endpoint and per minute, as well as overal
