@@ -96,7 +96,7 @@ authRouter.put(
     } catch (e) {
       // DB error reading user/credentials
       metrics.recordAuthAttempt('login', 'error');
-      return res.status(500).json({ message: 'internal error' });
+      return res.status(500).json({ message: e.message || 'internal server error' });
     }
 
     if (!user) {
