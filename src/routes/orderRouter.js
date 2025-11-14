@@ -4,6 +4,10 @@ const { Role, DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 const metrics = require('../metrics.js');
+
+const Logger = require('../logging.js');  
+const logger = new Logger(config); 
+
 const orderRouter = express.Router();
 
 orderRouter.docs = [
@@ -79,6 +83,10 @@ orderRouter.post(
   asyncHandler(async (req, res) => {
     const orderReq = req.body;
     const order = await DB.addDinerOrder(req.user, orderReq);
+    const factoryBody = {
+      diner: { id: req.user.id, name: req.user.name, email: req.user.email },
+      order,
+    };4
     // track time
     const t0 = process.hrtime.bigint()
     const r = await fetch(`${config.factory.url}/api/order`, {
@@ -92,6 +100,15 @@ orderRouter.post(
     // record factory latency (success or failure)
     metrics.recordFactoryLatency(factoryMs);
     const j = await r.json();
+
+    logger.factoryLogger({
+      url: `${config.factory.url}/api/order`,
+      statusCode: r.status,
+      requestBody: factoryBody,
+      responseBody: j,
+    });
+
+    
     if (r.ok) {
       // create business metrics: orders, items, revenue
       const itemsCount = Array.isArray(order.items) ? order.items.length : 0;

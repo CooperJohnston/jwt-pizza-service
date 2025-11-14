@@ -4,6 +4,8 @@ const config = require('../config.js');
 const { StatusCodeError } = require('../endpointHelper.js');
 const { Role } = require('../model/model.js');
 const dbModel = require('./dbModel.js');
+const Logger = require('../logging.js');
+const logger = new Logger(config);
 class DB {
   constructor() {
     this.initialized = this.initializeDatabase();
@@ -390,17 +392,23 @@ async updateUser(userId, name, email, password) {
   }
 
   async query(connection, sql, params) {
+    logger.dbLogger(sql, params);
     const [results] = await connection.execute(sql, params);
     return results;
   }
 
   async getID(connection, key, value, table) {
-    const [rows] = await connection.execute(`SELECT id FROM ${table} WHERE ${key}=?`, [value]);
+    const rows = await this.query(
+      connection,
+      `SELECT id FROM ${table} WHERE ${key}=?`,
+      [value]
+    );
     if (rows.length > 0) {
       return rows[0].id;
     }
     throw new Error('No ID found');
   }
+  
 
   async getConnection() {
     // Make sure the database is initialized before trying to get a connection.
